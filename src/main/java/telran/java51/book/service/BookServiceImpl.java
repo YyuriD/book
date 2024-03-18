@@ -7,6 +7,8 @@ import org.modelmapper.ModelMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import lombok.RequiredArgsConstructor;
 import telran.java51.book.dao.AuthorRepository;
 import telran.java51.book.dao.BookRepository;
@@ -27,6 +29,9 @@ public class BookServiceImpl implements BookService {
 	final AuthorRepository authorRepository;
 	final ModelMapper modelMapper;
 
+	@PersistenceContext
+	EntityManager em;
+
 	@Transactional
 	@Override
 	public boolean addBook(BookDto bookDto) {
@@ -35,12 +40,12 @@ public class BookServiceImpl implements BookService {
 		}
 		// Publisher
 		Publisher publisher = publisherRepository.findById(bookDto.getPublisher())
-				.orElseGet(() -> publisherRepository.save(new Publisher(bookDto.getPublisher())));		
+				.orElseGet(() -> publisherRepository.save(new Publisher(bookDto.getPublisher())));
 		// Authors
 		Set<Author> authors = bookDto.getAuthors().stream()
 				.map(a -> authorRepository.findById(a.getName())
 						.orElseGet(() -> authorRepository.save(new Author(a.getName(), a.getBirthDate()))))
-						.collect(Collectors.toSet());	
+				.collect(Collectors.toSet());
 		Book book = new Book(bookDto.getIsbn(), bookDto.getTitle(), authors, publisher);
 		bookRepository.save(book);
 		return true;
@@ -51,11 +56,19 @@ public class BookServiceImpl implements BookService {
 		Book book = bookRepository.findById(isbn).orElseThrow(EntityNotFoundException::new);
 		return modelMapper.map(book, BookDto.class);
 	}
-	
+
 	@Override
 	@Transactional
 	public BookDto remove(String isbn) {
-		Book book = bookRepository.findById(isbn).orElseThrow(EntityNotFoundException::new);
+//		Book book = bookRepository.findById(isbn).orElseThrow(EntityNotFoundException::new);
+		Book book = null;
+		try {
+			book = em.createQuery("select b from Book b left join fetch b.authors a where b.isbn=?1", Book.class)
+					.setParameter(1, isbn).getSingleResult();
+		} catch (Exception e) {
+			throw new EntityNotFoundException();
+		}
+
 		bookRepository.deleteById(isbn);
 		return modelMapper.map(book, BookDto.class);
 	}
@@ -71,31 +84,24 @@ public class BookServiceImpl implements BookService {
 	@Override
 	public Iterable<BookDto> findBooksByAuthor(String authorName) {
 		Author author = authorRepository.findById(authorName).orElseThrow(EntityNotFoundException::new);
-		return author.getBooks().stream()
-				.map(b -> modelMapper.map(b, BookDto.class))
-				.collect(Collectors.toList());
+		return author.getBooks().stream().map(b -> modelMapper.map(b, BookDto.class)).collect(Collectors.toList());
 	}
 
 	@Override
 	public Iterable<BookDto> findBooksByPublisher(String publisherName) {
 		Publisher publisher = publisherRepository.findById(publisherName).orElseThrow(EntityNotFoundException::new);
-		return publisher.getBooks().stream()
-				.map(b -> modelMapper.map(b, BookDto.class))
-				.collect(Collectors.toList());
+		return publisher.getBooks().stream().map(b -> modelMapper.map(b, BookDto.class)).collect(Collectors.toList());
 	}
 
 	@Override
 	public Iterable<AuthorDto> findBookAuthors(String isbn) {
 		Book book = bookRepository.findById(isbn).orElseThrow(EntityNotFoundException::new);
-		return book.getAuthors().stream()
-				.map(a -> modelMapper.map(a, AuthorDto.class))
-				.collect(Collectors.toList());
+		return book.getAuthors().stream().map(a -> modelMapper.map(a, AuthorDto.class)).collect(Collectors.toList());
 	}
 
 	@Override
 	public Iterable<String> findPublishersByAuthor(String authorName) {
-		return publisherRepository.findDistinctByBooksAuthorsName(authorName)
-				.map(Publisher::getPublisherName)
+		return publisherRepository.findDistinctByBooksAuthorsName(authorName).map(Publisher::getPublisherName)
 				.collect(Collectors.toList());
 	}
 
